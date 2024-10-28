@@ -20,6 +20,8 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"path"
+	"regexp"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -39,6 +41,7 @@ type WebhookBuilder struct {
 	apiType         runtime.Object
 	customDefaulter admission.CustomDefaulter
 	customValidator admission.CustomValidator
+	customPath      string
 	gvk             schema.GroupVersionKind
 	mgr             manager.Manager
 	config          *rest.Config
@@ -87,6 +90,12 @@ func (blder *WebhookBuilder) WithLogConstructor(logConstructor func(base logr.Lo
 // Defaults to true.
 func (blder *WebhookBuilder) RecoverPanic(recoverPanic bool) *WebhookBuilder {
 	blder.recoverPanic = &recoverPanic
+	return blder
+}
+
+// WithCustomPath overrides the webhook's default path by the customPath
+func (blder *WebhookBuilder) WithCustomPath(customPath string) *WebhookBuilder {
+	blder.customPath = customPath
 	return blder
 }
 
@@ -156,6 +165,11 @@ func (blder *WebhookBuilder) registerDefaultingWebhook() {
 	if mwh != nil {
 		mwh.LogConstructor = blder.logConstructor
 		path := generateMutatePath(blder.gvk)
+		if blder.customPath != "" {
+			if generateCustomPath(blder.customPath) != "" {
+				path = generateCustomPath(blder.customPath)
+			}
+		}
 
 		// Checking if the path is already registered.
 		// If so, just skip it.
@@ -185,6 +199,11 @@ func (blder *WebhookBuilder) registerValidatingWebhook() {
 	if vwh != nil {
 		vwh.LogConstructor = blder.logConstructor
 		path := generateValidatePath(blder.gvk)
+		if blder.customPath != "" {
+			if generateCustomPath(blder.customPath) != "" {
+				path = generateCustomPath(blder.customPath)
+			}
+		}
 
 		// Checking if the path is already registered.
 		// If so, just skip it.
@@ -250,4 +269,12 @@ func generateMutatePath(gvk schema.GroupVersionKind) string {
 func generateValidatePath(gvk schema.GroupVersionKind) string {
 	return "/validate-" + strings.ReplaceAll(gvk.Group, ".", "-") + "-" +
 		gvk.Version + "-" + strings.ToLower(gvk.Kind)
+}
+
+func generateCustomPath(customPath string) string {
+	validPathRegex := regexp.MustCompile(`^((/[a-zA-Z0-9-_]+)+|/)$`)
+	if !validPathRegex.MatchString(customPath) {
+		return ""
+	}
+	return path.Clean(customPath)
 }
